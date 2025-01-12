@@ -1,0 +1,227 @@
+#ifndef STRING_H
+#define STRING_H
+
+#include <iostream>
+#include <string>
+#include <memory>
+#include <stdexcept>
+#include <mutex>
+#include <unordered_map>
+#include <string_view>
+#include <cstddef>
+#include <cassert>
+
+// FNV-1a hash function
+constexpr inline uint32_t fnv1a(const char* str, std::size_t length) {
+    uint32_t hash = 0x811c9dc5;
+    for (std::size_t i = 0; i < length; ++i) {
+        hash ^= static_cast<uint32_t>(str[i]);
+        hash *= 0x01000193;
+    }
+    return hash;
+}
+
+uint32_t fnv1a_runtime(const char* str, std::size_t length) {
+    uint32_t hash = 0x811c9dc5;
+    for (std::size_t i = 0; i < length; ++i) {
+        hash ^= static_cast<uint32_t>(str[i]);
+        hash *= 0x01000193;
+    }
+    return hash;
+}
+
+class StringPool;
+class String;
+using StringPtr = std::shared_ptr<const String>;
+
+template<typename T>
+struct is_allowed_string_type : 
+    std::disjunction<
+        std::is_same<std::decay_t<T>, std::string>,
+        std::is_same<std::decay_t<T>, char*>
+    > {};
+
+// Define macros to forward member function calls
+#define FORWARD_METHOD(FuncName, ...) \
+    template <typename... Args> \
+    auto FuncName(Args&&... args) const -> decltype(data.FuncName(std::forward<Args>(args)...)) { \
+        return data.FuncName(std::forward<Args>(args)...); \
+    }
+
+// Define macros to forward const member function operators
+#define FORWARD_OPERATOR(Op) \
+    bool operator Op(const String& other) const { \
+        return data Op other.data; \
+    }
+
+// Define macros to forward member function operators with arguments
+#define FORWARD_OPERATOR_WITH_ARGS(Op, ...) \
+    template <typename... Args> \
+    auto operator Op (Args&& ... args) const -> decltype(data.operator Op(std::forward<Args>(args)...)) { \
+        return data.operator Op(std::forward<Args>(args)...); \
+    } \
+    template <typename... Args> \
+    auto operator Op (Args&& ... args) -> decltype(data.operator Op(std::forward<Args>(args)...)) { \
+        return data.operator Op(std::forward<Args>(args)...); \
+    }
+
+class String {
+public:
+    std::string data;
+
+    FORWARD_METHOD(length)
+    FORWARD_METHOD(size)
+    FORWARD_METHOD(empty)
+
+    FORWARD_OPERATOR_WITH_ARGS([], size_t)
+    FORWARD_METHOD(at, size_t )
+    FORWARD_METHOD(find, const std::string&, size_t)
+    FORWARD_METHOD(rfind, const std::string& str, size_t pos = std::string::npos) 
+    FORWARD_METHOD(substr, size_t pos = 0, size_t len = std::string::npos)
+
+    FORWARD_OPERATOR(==)
+
+private:
+    // No copy and assignment constructors
+    String(const String&) = delete;
+    String& operator=(const String&) = delete;
+    explicit String(const char* str) : data(str) {}
+    explicit String(const std::string& str) : data(str) {}
+
+public:
+    friend class StringPool;
+};
+
+class StringPool {
+public:
+    static std::shared_ptr<StringPool> getInstance() {
+        static std::shared_ptr<StringPool> instance(new StringPool());
+        return instance;
+    }
+
+    template<typename T, typename = std::enable_if_t<is_allowed_string_type<T>::value>>
+    static StringPtr try_emplace(T&& arg) {
+        std::string str(arg);
+        return StringPool::getInstance()->intern(str.c_str(), fnv1a(str.c_str(), str.length()));
+    }
+
+    StringPtr intern(const char* str, std::uint32_t hash);
+
+    ~StringPool() {
+        clearPool();
+    }
+
+    bool isStringIntern(const std::string& str) {
+        if (getStringByHash(fnv1a_runtime(str.c_str(), str.length()))) { return true; }
+        else return false;
+    }
+
+    StringPtr getStringByHash(std::uint32_t hash) {
+        std::lock_guard<std::mutex> lock(mutex_);
+        auto it = pool_.find(hash);
+        if (it != pool_.end()) {
+            return it->second.lock();
+        }
+        return nullptr;
+    }
+
+private:
+    StringPool() = default;
+
+    void clearPool() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        while (!pool_.empty()) {
+            auto it = pool_.begin();
+            pool_.erase(it); // Erase from the pool map
+        }
+    }
+
+    std::mutex mutex_;
+    std::unordered_map<std::uint32_t, std::weak_ptr<const String>> pool_;
+};
+
+class StringRef {
+public:
+    template<typename T, typename = std::enable_if_t<is_allowed_string_type<T>::value>>
+    StringRef(T&& arg) : ptr_(StringPool::try_emplace(std::forward<T>(arg))) {}
+
+    StringRef(StringPtr ptr) : ptr_(ptr) {}
+    StringRef(StringPtr& ptr) : ptr_(ptr) {}
+
+    StringRef(const StringRef& other) : ptr_(other.ptr_) {};
+    StringRef& operator=(const StringRef& other) {
+        ptr_ = other.ptr_;
+        return *this;
+    }
+
+    StringRef(StringRef&& other) noexcept : ptr_(std::move(other.ptr_)) {}
+    StringRef& operator=(StringRef&& other) noexcept {
+        if (this != &other) {
+            ptr_ = std::move(other.ptr_);
+        }
+        return *this;
+    }
+
+    // Get the shared pointer
+    operator StringPtr() const {
+        return ptr_;
+    }
+
+    const String* operator->() const {
+        return ptr_.get();
+    }
+
+    const String& operator*() const {
+        return *ptr_;
+    }
+
+    bool operator==(const StringRef& other) const {
+        return ptr_.get() == other.ptr_.get();
+    }
+
+    bool operator!=(const StringRef& other) const {
+        return ptr_.get() != other.ptr_.get();
+    }
+
+    const String* getRawPointer() const {
+        return ptr_.get();
+    }
+
+private:
+    StringPtr ptr_;
+};
+
+// Custom hash function for StringRef
+namespace std {
+    template<>
+    struct hash<StringRef> {
+        size_t operator()(const StringRef& ref) const {
+            return std::hash<const String*>{}(static_cast<StringPtr>(ref).get());
+        }
+    };
+}
+
+inline StringPtr operator"" _hs(const char* str, std::size_t length) {
+    uint32_t hash = fnv1a(str, length);
+    return StringPool::getInstance()->intern(str, hash);
+}
+
+StringPtr StringPool::intern(const char* str, std::uint32_t hash) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    auto it = pool_.find(hash);
+    if (it != pool_.end()) {
+        return it->second.lock();
+    }
+    auto deleter = [this, hash](const String* p) {
+        std::lock_guard<std::mutex> lock(this->mutex_);
+        this->pool_.erase(hash);
+        delete p;
+    };
+    auto string_ref = StringPtr(new String(str), deleter);
+    pool_.emplace(hash, std::weak_ptr<const String>(string_ref));
+    return string_ref;
+}
+
+#endif // STRING_H
+
