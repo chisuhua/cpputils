@@ -1,52 +1,38 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(SpscQueueTest)
+# 项目名称
+project(cpputils)
 
 # 设置 C++ 标准
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_STANDARD_REQUIRED True)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-if(APPLE)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++")
+# 查找 doctest 头文件
+find_path(DOCTEST_INCLUDE_DIR NAMES doctest/doctest.h
+    PATHS ${CMAKE_SOURCE_DIR}/doctest
+    NO_DEFAULT_PATH
+)
 
-    #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -stdlib=libc++ -static-libc++")
-    #set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -static-libc++")
-    #set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -stdlib=libc++ -static-libc++")
+if(NOT DOCTEST_INCLUDE_DIR)
+    message(FATAL_ERROR "doctest include directory not found")
 endif()
 
-if(APPLE)
-    #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -nostdinc++")
-    #find_package(LibCXX REQUIRED)
-    #include_directories(${LIBCXX_INCLUDE_DIRS})
-    #link_directories(${LIBCXX_LIBRARY_DIRS})
-    #link_libraries(c++)
-endif()
+# 包含 doctest 头文件路径
+include_directories(${DOCTEST_INCLUDE_DIR})
 
-# 添加源文件目录
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/external/doctest/doctest)
+# 添加源文件
+set(SOURCES
+    main.cpp
+    Queue.h
+    String.h
+)
 
-# 添加 doctest 库
-add_subdirectory(external/doctest)
+# 创建可执行文件
+add_executable(cpputils ${SOURCES})
 
-# 添加测试源文件
-add_executable(test_spsc_queue test/test_spsc_queue.cpp)
-target_link_libraries(test_spsc_queue doctest::doctest)
-
-#add_library(spmc_queue spmc_queue.h)
-add_executable(test_spmc_queue test/test_spmc_queue.cpp)
-target_link_libraries(test_spmc_queue doctest::doctest)
-
-# 添加可执行文件
-#add_executable(test_string_intern include/String.h)
-#target_link_libraries(test_string_intern doctest::doctest)
-add_executable(test_string_intern test_string_intern.cpp)
-target_link_libraries(test_string_intern doctest::doctest)
-
-# 设置测试目标
+# 运行测试
 enable_testing()
-add_test(NAME test_spsc_queue COMMAND test_spsc_queue)
-add_test(NAME test_spmc_queue COMMAND test_spmc_queue)
-add_test(NAME run_tests COMMAND test_string_intern)
+
+# 添加测试
+add_test(NAME cpputils_tests COMMAND cpputils --doctest)
+
