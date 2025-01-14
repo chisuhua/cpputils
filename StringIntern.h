@@ -22,7 +22,7 @@ constexpr inline uint32_t fnv1a(const char* str, std::size_t length) {
     return hash;
 }
 
-uint32_t fnv1a_runtime(const char* str, std::size_t length) {
+inline uint32_t fnv1a_runtime(const char* str, std::size_t length) {
     uint32_t hash = 0x811c9dc5;
     for (std::size_t i = 0; i < length; ++i) {
         hash ^= static_cast<uint32_t>(str[i]);
@@ -204,7 +204,7 @@ inline StringPtr operator"" _hs(const char* str, std::size_t length) {
     return StringPool::getInstance()->intern(str, hash);
 }
 
-StringPtr StringPool::intern(const char* str, std::uint32_t hash) {
+inline StringPtr StringPool::intern(const char* str, std::uint32_t hash) {
     std::lock_guard<std::mutex> lock(mutex_);
 
     auto it = pool_.find(hash);
